@@ -1,0 +1,1 @@
+C:\Java\jdk1.8.0_231\bin\java -Dfile.encoding=utf-8 -Dconfig.file=conf/application.conf -Dlogback.configurationFile=conf/logback.xml -cp "genericapp-assembly-0.1.0-deps.jar;genericapp-assembly-0.1.0.jar" com.svserhii.genericapp.Main
