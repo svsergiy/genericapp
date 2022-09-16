@@ -1,6 +1,6 @@
 ThisBuild / version := "0.1.0"
 ThisBuild / scalaVersion := "2.13.8"
-ThisBuild / organization := "com.svserhii"
+ThisBuild / organization := "com.svsergiy"
 
 ThisBuild / assemblyMergeStrategy := {
   case x if Assembly.isConfigFile(x) =>
@@ -49,7 +49,6 @@ libraryDependencies ++= Seq(
   "com.typesafe.akka" %% "akka-http" % akkaHttpVersion,
   "com.typesafe.akka" %% "akka-http-spray-json" % akkaHttpVersion,
   "com.typesafe.slick" %% "slick" % "3.3.3",
-//  "org.slf4j" % "slf4j-nop" % "1.7.36",
   "com.typesafe.slick" %% "slick-hikaricp" % "3.3.3",
   "com.microsoft.sqlserver" % "mssql-jdbc" % "7.2.2.jre8",
   "org.scalameta" %% "munit" % "0.7.29" % Test
