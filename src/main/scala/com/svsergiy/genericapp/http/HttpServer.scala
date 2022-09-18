@@ -5,11 +5,10 @@ import akka.actor.{ActorContext, ActorSystem}
 import akka.event.{Logging, LoggingAdapter}
 import akka.http.scaladsl.{Http, ServerBuilder}
 import akka.http.scaladsl.server.Route
-import com.svsergiy.genericapp.configuration.HttpServerParameters
-import com.svsergiy.genericapp.database.RequestProcessorInterface
-
 import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.util.{Failure, Success}
+import com.svsergiy.genericapp.configuration.HttpServerParameters
+import com.svsergiy.genericapp.database.RequestProcessorInterface
 
 class HttpServer(context: ActorContext, val httpServerInfo: HttpServerParameters, requestProcessor: RequestProcessorInterface) {
   private implicit val system: ActorSystem = context.system

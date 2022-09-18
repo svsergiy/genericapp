@@ -1,37 +1,32 @@
 package com.svsergiy.genericapp.genesys
 
-//Akka imports:
 import akka.event.LoggingAdapter
-
-//Other imports:
 import scala.util.{Try, Failure}
 import scala.util.control.NonFatal
 import java.util.EventObject
-
-//Genesys imports:
 import com.genesyslab.platform.commons.protocol.{ChannelState, ChannelClosedEvent, ChannelErrorEvent, ChannelListener, Message, MessageHandler}
 import com.genesyslab.platform.management.protocol.{LocalControlAgentProtocol, ApplicationExecutionMode, ApplicationStatus}
 import com.genesyslab.platform.management.protocol.localcontrolagent.requests.RequestUpdateStatus
 import com.genesyslab.platform.management.protocol.localcontrolagent.responses.ResponseExecutionModeChanged
 import com.genesyslab.platform.management.protocol.localcontrolagent.events.{EventChangeExecutionMode, EventSuspendApplication}
-
-//Application imports:
 import com.svsergiy.genericapp.configuration.LcaConnectionParameters
 
+/** Trait is used for connection to Genesys LCA component
+ */
 trait LocalControlAgentDriver {
   private var logOpt: Option[LoggingAdapter] = None
   private var lcaProtocolOpt: Option[LocalControlAgentProtocol] = None
 
-  protected def initializeLcaDriver(appStartInfo: LcaConnectionParameters, log: LoggingAdapter): Try[Unit] = {
+  protected def initializeLcaDriver(lcaConnectionInfo: LcaConnectionParameters, log: LoggingAdapter): Try[Unit] = {
     logOpt = Option(log)
     if (lcaProtocolOpt.isDefined)
       Failure(new Exception("The LCA protocol is already created"))
     else {
       Try {
-        val lcaProtocol = new LocalControlAgentProtocol(appStartInfo.lcaPort)
-        lcaProtocol.setApplicationType(appStartInfo.appType)
-        lcaProtocol.setClientName(appStartInfo.appName)
-        lcaProtocol.setClientId(appStartInfo.appDbId)
+        val lcaProtocol = new LocalControlAgentProtocol(lcaConnectionInfo.lcaPort)
+        lcaProtocol.setApplicationType(lcaConnectionInfo.appType)
+        lcaProtocol.setClientName(lcaConnectionInfo.appName)
+        lcaProtocol.setClientId(lcaConnectionInfo.appDbId)
         lcaProtocol.addChannelListener(new LCAChannelListener())
         lcaProtocol.setMessageHandler(new LCAMessageHandler())
         lcaProtocolOpt = Some(lcaProtocol)
@@ -40,34 +35,26 @@ trait LocalControlAgentDriver {
   }
 
   protected def openLca(): Try[Unit] =
-    Try {
-      lcaProtocolOpt.foreach {
-        lcaProt => {
-          lcaProt.openAsync()
-        }
-      }
-    }
+    Try(lcaProtocolOpt.foreach(_.openAsync()))
 
   protected def closeLca(): Unit = {
-    Try {
-      lcaProtocolOpt.foreach(_.closeAsync())
-    }
+    Try(lcaProtocolOpt.foreach(_.closeAsync()))
     lcaProtocolOpt = None
   }
 
-  def isLcaConnected: Boolean =
+  protected def isLcaConnected: Boolean =
     lcaProtocolOpt.exists(_.getState == ChannelState.Opened)
 
-  def getExecutionMode: Option[ApplicationExecutionMode] =
+  protected def getExecutionMode: Option[ApplicationExecutionMode] =
     lcaProtocolOpt.map(_.getExecutionMode)
 
-  def getControlStatus: Option[Int] =
+  protected def getControlStatus: Option[Int] =
     lcaProtocolOpt.map(_.getControlStatus)
 
   protected def doUpdateStatus(execModeOpt: Option[ApplicationExecutionMode],
                                controlStatus: ApplicationStatus): Try[Unit] = {
     val theRequest = RequestUpdateStatus.create
-    lcaProtocolOpt.foreach {lcaProt =>
+    lcaProtocolOpt.foreach { lcaProt =>
       theRequest.setReferenceId(0)
       if (lcaProt.getClientName != "") theRequest.setApplicationName(lcaProt.getClientName)
       if (lcaProt.getClientId != 0) theRequest.setControlObjectId(lcaProt.getClientId)
@@ -76,7 +63,7 @@ trait LocalControlAgentDriver {
       if (lcaProt.getProcessId != -1) theRequest.setProcessId(lcaProt.getProcessId)
     }
     Try {
-      lcaProtocolOpt.foreach {lcaProt =>
+      lcaProtocolOpt.foreach { lcaProt =>
         lcaProt.setControlStatus(controlStatus.ordinal)
         execModeOpt.foreach(execMode => lcaProt.setExecutionMode(execMode))
         lcaProt.send(theRequest)

@@ -1,47 +1,42 @@
 package com.svsergiy.genericapp
 
-//Akka imports:
 import akka.actor.{Actor, ActorRef, Props, Timers}
 import akka.event.LoggingReceive
-
-//Cats imports:
 import cats.data.Validated.{Invalid, Valid}
-
-//Other imports:
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.Future
 import scala.concurrent.duration.DurationInt
 import scala.util.Try
 import scala.util.control.NonFatal
 import com.typesafe.config.Config
-
-//Genesys imports:
 import com.genesyslab.platform.management.protocol.ApplicationStatus
-
-//Application imports:
-import com.svsergiy.genericapp.configuration.{ApplicationConfiguration, ConfigurationUpdateListener}
+import com.svsergiy.genericapp.configuration.{ApplicationConfiguration, ConfigurationUpdateListener, UpdatedParameters}
 import com.svsergiy.genericapp.genesys.{ConfigServerActor, LocalControlAgentActor}
 import com.svsergiy.genericapp.genesys.LocalControlAgentActor.{ConnectedToLca, SetApplicationStatus, StopApplication}
 import com.svsergiy.genericapp.http.HttpServer
 import com.svsergiy.genericapp.database.RequestProcessorDB
 
 object ManagementService {
+  /** Timer key for ConfigServer connection timeout. When reached application will be started without
+   *  connection to Genesys ConfigServer
+   */
   private case object ConfigServerConnectionTimerKey
+  /** Timer key for restarting Http Server in case of problem with binding to specified port */
   private case object HttpServerRestartTimerKey
 
-  sealed trait ManagementCommands
-  case object StartConfigServerActor extends ManagementCommands
-  case object ConfServerActorStartTimeout extends ManagementCommands
-  case class ConfigurationUpdated(updatedParams: UpdatedParameters) extends ManagementCommands
-  case object SystemInitialized extends ManagementCommands
-  case object StartHttpServer extends ManagementCommands
-  case object HttpServerStarted extends ManagementCommands
-  case class FailedToStartHttpServer(ex: Throwable) extends ManagementCommands
-  case object RequestProcessorAvailable extends ManagementCommands
-  case object RequestProcessorUnavailable extends ManagementCommands
+  /** ManagementService Actor messages that are used for controlling application */
+  sealed trait ManagementServiceMessage
+  case object StartConfigServerActor extends ManagementServiceMessage
+  case object ConfServerActorStartTimeout extends ManagementServiceMessage
+  case class ConfigurationUpdated(updatedParams: UpdatedParameters) extends ManagementServiceMessage
+  case object SystemInitialized extends ManagementServiceMessage
+  case object StartHttpServer extends ManagementServiceMessage
+  case object HttpServerStarted extends ManagementServiceMessage
+  case class FailedToStartHttpServer(ex: Throwable) extends ManagementServiceMessage
+  case object RequestProcessorAvailable extends ManagementServiceMessage
+  case object RequestProcessorUnavailable extends ManagementServiceMessage
 
-  case class UpdatedParameters(appStart: Boolean, httpServer: Boolean, database: Boolean)
-
+  /** Case class is used for describing application status */
   case class SystemStatus(requestsProcessorStatus: ApplicationStatus, httpServerStatus: ApplicationStatus) {
     def getSystemStatus: ApplicationStatus = {
       if (requestsProcessorStatus == ApplicationStatus.Running && httpServerStatus == ApplicationStatus.Running) {
@@ -58,111 +53,40 @@ object ManagementService {
 class ManagementService() extends Actor with Timers with akka.actor.ActorLogging with ConfigurationUpdateListener {
   import com.svsergiy.genericapp.ManagementService._
 
-  implicit val config: Config = context.system.settings.config
+  private implicit val config: Config = context.system.settings.config
 
-  var confServRefOpt: Option[ActorRef] = None
-  var lcaRefOpt: Option[ActorRef] = None
-  val requestProcessor: RequestProcessorDB = new RequestProcessorDB
-  var httpServerOpt: Option[HttpServer] = None
-
-  override def configurationUpdated(updatedParams: UpdatedParameters): Unit = {
-    log.info(s"Application Configuration has been updated: ${updatedParams.toString}")
-    context.self ! ConfigurationUpdated(updatedParams)
-  }
+  // TODO: Transfer mutable variables to Actor states
+  private var confServRefOpt: Option[ActorRef] = None
+  private var lcaRefOpt: Option[ActorRef] = None
+  private val requestProcessor: RequestProcessorDB = new RequestProcessorDB
+  private var httpServerOpt: Option[HttpServer] = None
 
   override def preStart(): Unit = {
     super.preStart()
     // Read configuration parameters from application.conf file:
     ApplicationConfiguration.parseGenesysConnectionParameters match {
-      case Valid(genConnParams) => ApplicationConfiguration.setGenesysConnectionInfo(genConnParams)
+      case Valid(genConnParams) => ApplicationConfiguration.genesysConnectionInfoOpt = Some(genConnParams)
       case Invalid(errs) => errs.map(err => log.warning(err.errorMessage))
     }
     ApplicationConfiguration.parseDatabaseParameters match {
-      case Valid(dbParams) => ApplicationConfiguration.setDbConnectionInfo(dbParams)
+      case Valid(dbParams) => ApplicationConfiguration.dbConnectionInfoOpt = Some(dbParams)
       case Invalid(errs) => errs.map(err => log.warning(err.errorMessage))
     }
     ApplicationConfiguration.parseHttpServerParameters match {
-      case Valid(httpSrvParams) => ApplicationConfiguration.setHttpServerInfo(httpSrvParams)
+      case Valid(httpSrvParams) => ApplicationConfiguration.httpServerInfoOpt = Some(httpSrvParams)
       case Invalid(errs) => errs.map(err => log.warning(err.errorMessage))
     }
     context.self ! StartConfigServerActor
   }
 
-  def stopApplication(gracefully: Boolean): Unit = {
-    if (gracefully) {
-      log.info("Start to stop application gracefully...")
-      lcaRefOpt.foreach(_ ! SetApplicationStatus(ApplicationStatus.Suspended))
-    }
-    log.info("Stopping Genesys Generic App...")
-    httpServerOpt.foreach(_.stopServer)
-    requestProcessor.release()
-    lcaRefOpt.foreach(context.stop)
-    confServRefOpt.foreach(context.stop)
-    context.system.terminate()
-  }
-
-  def initializeSystem(): Future[Unit] = Future {
-    if (ApplicationConfiguration.getHttpServerInfo.isEmpty || ApplicationConfiguration.getDbConnectionInfo.isEmpty) {
-      log.error("Mandatory configuration parameters are not specified. Application will be stopped...")
-      StopApplication(false)
-    } else {
-      ApplicationConfiguration.getLcaConnectionInfo.foreach { lcaConnInfo =>
-        lcaRefOpt = Some(context.actorOf(LocalControlAgentActor.props(lcaConnInfo, context.self)))
-      }
-      ApplicationConfiguration.getDbConnectionInfo.foreach { dbConnInfo =>
-        requestProcessor.setDbParameters(dbConnInfo)
-        requestProcessor.initialize()
-        context.self ! RequestProcessorAvailable
-      }
-      ApplicationConfiguration.getHttpServerInfo.foreach { httpSrvInfo =>
-        val httpSrv = new HttpServer(context, httpSrvInfo, requestProcessor)
-        httpServerOpt = Some(httpSrv)
-        context.self ! StartHttpServer
-      }
-      context.self ! SystemInitialized
-    }
-  }
-
-  def reinitializeLcaActor(): Try[Unit] = Try {
-    log.info("Try to restart Lca Actor")
-    ApplicationConfiguration.getLcaConnectionInfo.foreach { lcaConnInfo =>
-      lcaRefOpt.foreach(context.stop)
-      val lcaRef = context.actorOf(LocalControlAgentActor.props(lcaConnInfo, context.self))
-      lcaRefOpt = Some(lcaRef)
-    }
-  }
-
-  def reinitializeHttpServer(): Try[Unit] = Try {
-    log.info("Try to restart Http Server")
-    ApplicationConfiguration.getHttpServerInfo.foreach { httpSrvInfo =>
-      httpServerOpt.foreach { httpSrv =>
-        httpSrv.stopServer
-      }
-      val httpSrv = new HttpServer(context, httpSrvInfo, requestProcessor)
-      httpServerOpt = Some(httpSrv)
-      context.self ! StartHttpServer
-    }
-  }
-
-  def reinitializeRequestProcessor(): Try[Unit] = Try {
-    log.info("Try to restart Requests Processor")
-    ApplicationConfiguration.getDbConnectionInfo.foreach { dbConnInfo =>
-      context.self ! RequestProcessorUnavailable
-      requestProcessor.release()
-      requestProcessor.setDbParameters(dbConnInfo)
-      requestProcessor.initialize()
-      context.self ! RequestProcessorAvailable
-    }
-  }
-
   val receive: Receive = LoggingReceive {
     case StartConfigServerActor =>
-      // Start ConfigServer actor:
-      ApplicationConfiguration.getGenesysConnectionInfo.map { genConnParams =>
+      /** Start ConfigServer Actor */
+      ApplicationConfiguration.genesysConnectionInfoOpt.map { genConnParams =>
         context.become(startingConfigServerActor)
-        // Add itself as configuration update listener
+        /** Add itself as configuration update listener */
         ApplicationConfiguration.addConfigurationUpdateListener(this)
-        confServRefOpt = Option(context.actorOf(ConfigServerActor.props(genConnParams, context.self)))
+        confServRefOpt = Option(context.actorOf(ConfigServerActor.props(genConnParams)))
         timers.startSingleTimer(ConfigServerConnectionTimerKey, ConfServerActorStartTimeout, genConnParams.connectionTimeout.seconds)
       }.getOrElse {
         context.become(
@@ -224,7 +148,6 @@ class ManagementService() extends Actor with Timers with akka.actor.ActorLogging
       lcaRefOpt.foreach(_ ! SetApplicationStatus(newSystemStatus.getSystemStatus))
     case StartHttpServer =>
       httpServerOpt.foreach { httpSrv =>
-//        httpSrv.
         if (!httpSrv.isStarted) {
           log.debug(s"Trying to start Http Server on host: ${httpSrv.httpServerInfo.host} and port: ${httpSrv.httpServerInfo.port}...")
           httpSrv.startServer.map(_ => context.self ! HttpServerStarted).recover {
@@ -312,5 +235,80 @@ class ManagementService() extends Actor with Timers with akka.actor.ActorLogging
       timers.cancel(HttpServerRestartTimerKey)
       timers.cancel(ConfigServerConnectionTimerKey)
       stopApplication(gracefully)
+  }
+
+  override def configurationUpdated(updatedParams: UpdatedParameters): Unit = {
+    log.info(s"Application Configuration has been updated: ${updatedParams.toString}")
+    context.self ! ConfigurationUpdated(updatedParams)
+  }
+
+  private def stopApplication(gracefully: Boolean): Unit = {
+    if (gracefully) {
+      log.info("Start to stop application gracefully...")
+      /** In case of graceful stop "Suspended" status should be sent to Genesys to prevent "Application Failure"
+       *  Alarm message generation on Genesys side
+       */
+      lcaRefOpt.foreach(_ ! SetApplicationStatus(ApplicationStatus.Suspended))
+    }
+    log.info("Stopping Genesys Generic App...")
+    httpServerOpt.foreach(_.stopServer)
+    requestProcessor.release()
+    lcaRefOpt.foreach(context.stop)
+    confServRefOpt.foreach(context.stop)
+    context.system.terminate()
+  }
+
+  private def initializeSystem(): Future[Unit] = Future {
+    if (ApplicationConfiguration.httpServerInfoOpt.isEmpty || ApplicationConfiguration.dbConnectionInfoOpt.isEmpty) {
+      log.error("Mandatory configuration parameters are not specified. Application will be stopped...")
+      StopApplication(false)
+    } else {
+      ApplicationConfiguration.lcaConnectionInfoOpt.foreach { lcaConnInfo =>
+        lcaRefOpt = Some(context.actorOf(LocalControlAgentActor.props(lcaConnInfo, context.self)))
+      }
+      ApplicationConfiguration.dbConnectionInfoOpt.foreach { dbConnInfo =>
+        requestProcessor.setDbParameters(dbConnInfo)
+        requestProcessor.initialize()
+        context.self ! RequestProcessorAvailable
+      }
+      ApplicationConfiguration.httpServerInfoOpt.foreach { httpSrvInfo =>
+        val httpSrv = new HttpServer(context, httpSrvInfo, requestProcessor)
+        httpServerOpt = Some(httpSrv)
+        context.self ! StartHttpServer
+      }
+      context.self ! SystemInitialized
+    }
+  }
+
+  private def reinitializeLcaActor(): Try[Unit] = Try {
+    log.info("Try to restart Lca Actor")
+    ApplicationConfiguration.lcaConnectionInfoOpt.foreach { lcaConnInfo =>
+      lcaRefOpt.foreach(context.stop)
+      val lcaRef = context.actorOf(LocalControlAgentActor.props(lcaConnInfo, context.self))
+      lcaRefOpt = Some(lcaRef)
+    }
+  }
+
+  private def reinitializeHttpServer(): Try[Unit] = Try {
+    log.info("Try to restart Http Server")
+    ApplicationConfiguration.httpServerInfoOpt.foreach { httpSrvInfo =>
+      httpServerOpt.foreach { httpSrv =>
+        httpSrv.stopServer
+      }
+      val httpSrv = new HttpServer(context, httpSrvInfo, requestProcessor)
+      httpServerOpt = Some(httpSrv)
+      context.self ! StartHttpServer
+    }
+  }
+
+  private def reinitializeRequestProcessor(): Try[Unit] = Try {
+    log.info("Try to restart Requests Processor")
+    ApplicationConfiguration.dbConnectionInfoOpt.foreach { dbConnInfo =>
+      context.self ! RequestProcessorUnavailable
+      requestProcessor.release()
+      requestProcessor.setDbParameters(dbConnInfo)
+      requestProcessor.initialize()
+      context.self ! RequestProcessorAvailable
+    }
   }
 }

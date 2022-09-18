@@ -1,20 +1,12 @@
 package com.svsergiy.genericapp.configuration
 
-//Cats imports:
 import cats.data.Validated._
 import cats.data.ValidatedNec
 import cats.implicits._
-
-//Other imports:
 import com.typesafe.config.{Config, ConfigFactory}
 import scala.collection.mutable.ListBuffer
 import scala.util.Try
-
-//Genesys imports:
 import com.genesyslab.platform.applicationblocks.com.objects.{CfgApplication, CfgHost}
-
-//Application imports:
-import com.svsergiy.genericapp.ManagementService.UpdatedParameters
 import com.svsergiy.genericapp.validation._
 
 object ApplicationConfiguration {
@@ -22,24 +14,21 @@ object ApplicationConfiguration {
 
   private val configUpdateListeners = ListBuffer.empty[ConfigurationUpdateListener]
 
-  private var genesysConnectionInfoOpt: Option[GenesysConnectionParameters] = None
-  private var lcaConnectionInfoOpt: Option[LcaConnectionParameters] = None
-  private var httpServerInfoOpt: Option[HttpServerParameters] = None
-  private var dbConnectionInfoOpt: Option[DatabaseParameters] = None
+  var genesysConnectionInfoOpt: Option[GenesysConnectionParameters] = None
+  var lcaConnectionInfoOpt: Option[LcaConnectionParameters] = None
+  var httpServerInfoOpt: Option[HttpServerParameters] = None
+  var dbConnectionInfoOpt: Option[DatabaseParameters] = None
 
-  def addConfigurationUpdateListener(cfgUpdateListener: ConfigurationUpdateListener): Unit = {
+  def addConfigurationUpdateListener(cfgUpdateListener: ConfigurationUpdateListener): Unit =
     configUpdateListeners += cfgUpdateListener
-  }
 
-  def removeConfigurationUpdateListener(cfgUpdateListener: ConfigurationUpdateListener): Unit = {
+  def removeConfigurationUpdateListener(cfgUpdateListener: ConfigurationUpdateListener): Unit =
     configUpdateListeners -= cfgUpdateListener
-  }
 
-  def configurationUpdated(updatedParams: UpdatedParameters): Unit = {
+  def configurationUpdated(updatedParams: UpdatedParameters): Unit =
     configUpdateListeners.foreach(_.configurationUpdated(updatedParams))
-  }
 
-  // Retrieve genesys connection information from application.conf configuration file
+  /** Retrieve genesys connection information from application.conf configuration file */
   def parseGenesysConnectionParameters(implicit config: Config):  ValidationResult[GenesysConnectionParameters] = {
     Try(config.getConfig("genesys"))
       .map(Right(_))
@@ -51,34 +40,35 @@ object ApplicationConfiguration {
           .recover(_ => Left(ConfServConfigIsNotDefined))
           .get.toValidatedNec
           .andThen { confservConfig =>
-            val prmEndpoint = Try(confservConfig.getObjectList("endpoints").get(0).toConfig).getOrElse(ConfigFactory.empty())
-            val bkpEndpoint = Try(confservConfig.getObjectList("endpoints").get(1).toConfig).getOrElse(ConfigFactory.empty())
-            (
-              Try(confservConfig.getString("client-name").trim).map(Right(_))
-                .map {
-                  case Right("") => Left(ClientNameIsNotSpecified)
-                  case Right(value) => Right(value)
-                }
-                .recover(_ => Left(ClientNameIsNotSpecified)).get.toValidatedNec,
-              Try(confservConfig.getString("cfg-app-type").trim).map(Right(_))
-                .map {
-                  case Right("") => Left(CfgAppTypeIsNotSpecified)
-                  case Right(value) => Right(value)
-                }
-                .recover(_ => Left(CfgAppTypeIsNotSpecified)).get.toValidatedNec,
-              Try(prmEndpoint.getString("host").trim).map(Right(_))
-                .map {
-                  case Right("") => Left(PrimaryConfServHostIsNotSpecified)
-                  case Right(value) => Right(value)
-                }
-                .recover(_ => Left(PrimaryConfServHostIsNotSpecified)).get.toValidatedNec,
-              Try(prmEndpoint.getInt("port")).map(Right(_))
-                .map {
-                  case Right(value) if value <= 0 => Left(PrimaryConfServPortIsNotSpecified)
-                  case Right(value) => Right(value)
-                }
-                .recover(_ => Left(PrimaryConfServPortIsNotSpecified)).get.toValidatedNec
-            ).mapN {(clientName, cfgAppType, prmConfigSrvHost, prmConfigSrvPort) =>
+            val prmEndpoint = Try(confservConfig.getObjectList("endpoints").get(0).toConfig)
+              .getOrElse(ConfigFactory.empty())
+            val bkpEndpoint = Try(confservConfig.getObjectList("endpoints").get(1).toConfig)
+              .getOrElse(ConfigFactory.empty())
+            val clientNameV = Try(confservConfig.getString("client-name").trim).map(Right(_))
+              .map {
+                case Right("") => Left(ClientNameIsNotSpecified)
+                case Right(value) => Right(value)
+              }
+              .recover(_ => Left(ClientNameIsNotSpecified)).get.toValidatedNec
+            val cfgAppTypeV = Try(confservConfig.getString("cfg-app-type").trim).map(Right(_))
+              .map {
+                case Right("") => Left(CfgAppTypeIsNotSpecified)
+                case Right(value) => Right(value)
+              }
+              .recover(_ => Left(CfgAppTypeIsNotSpecified)).get.toValidatedNec
+            val prmConfigSrvHostV = Try(prmEndpoint.getString("host").trim).map(Right(_))
+              .map {
+                case Right("") => Left(PrimaryConfServHostIsNotSpecified)
+                case Right(value) => Right(value)
+              }
+              .recover(_ => Left(PrimaryConfServHostIsNotSpecified)).get.toValidatedNec
+            val prmConfigSrvPortV = Try(prmEndpoint.getInt("port")).map(Right(_))
+              .map {
+                case Right(value) if value <= 0 => Left(PrimaryConfServPortIsNotSpecified)
+                case Right(value) => Right(value)
+              }
+              .recover(_ => Left(PrimaryConfServPortIsNotSpecified)).get.toValidatedNec
+            (clientNameV, cfgAppTypeV, prmConfigSrvHostV, prmConfigSrvPortV).mapN {(clientName, cfgAppType, prmConfigSrvHost, prmConfigSrvPort) =>
               GenesysConnectionParameters(
                 clientName = Try(genesysConfig.getString("client-name").trim).getOrElse("GenGenericApp"),
                 stringsEncoding = Try(genesysConfig.getString("strings-encoding").trim).getOrElse("utf-8"),
@@ -115,11 +105,7 @@ object ApplicationConfiguration {
       }
   }
 
-  def getGenesysConnectionInfo: Option[GenesysConnectionParameters] = genesysConnectionInfoOpt
-
-  def setGenesysConnectionInfo(genConnInfo: GenesysConnectionParameters): Unit = genesysConnectionInfoOpt = Option(genConnInfo)
-
-  // Read LCA connection information from configuration database
+  /** Read LCA connection information from Genesys configuration objects */
   def readLcaConnectionParameters(cfgApp: CfgApplication, hostInfo: CfgHost): ValidationResult[LcaConnectionParameters] = {
     val lcaPortV = Try(hostInfo.getLCAPort.toInt)
       .map(Right(_))
@@ -152,33 +138,29 @@ object ApplicationConfiguration {
     }
   }
 
-  def getLcaConnectionInfo: Option[LcaConnectionParameters] = lcaConnectionInfoOpt
-
-  def setLcaConnectionInfo(appStartInfo: LcaConnectionParameters): Unit = lcaConnectionInfoOpt = Option(appStartInfo)
-
-  // Retrieve genesys connection information from application.conf configuration file
+  /** Retrieve genesys connection information from application.conf configuration file */
   def parseHttpServerParameters(implicit config: Config): ValidationResult[HttpServerParameters] = {
     Try(config.getConfig("app")).map(Right(_))
       .recover(_ => Left(AppConfigIsNotDefined))
       .get.toValidatedNec
       .andThen {appConfig =>
-        Try(appConfig.getInt("port")).map(Right(_))
+        val appPortV = Try(appConfig.getInt("port")).map(Right(_))
           .map {
             case Right(value) if value <= 0 => Left(AppPortIsNotSpecified)
             case Right(value) => Right(value)
           }
           .recover(_ => Left(AppPortIsNotSpecified))
           .get.toValidatedNec
-          .map {appPort =>
-            HttpServerParameters(
-              host = Try(appConfig.getString("host").trim).getOrElse("localhost"),
-              port = appPort
-            )
+        appPortV.map {appPort =>
+          HttpServerParameters(
+            host = Try(appConfig.getString("host").trim).getOrElse("localhost"),
+            port = appPort
+          )
         }
       }
   }
 
-  // Read Http server information from configuration database
+  /* Read Http server information from Genesys configuration objects */
   def readHttpServerParameters(cfgApp: CfgApplication, hostInfo: CfgHost): ValidationResult[HttpServerParameters] = {
     val appPortV = Try(cfgApp.getServerInfo.getPort.toInt)
       .map(Right(_))
@@ -190,18 +172,14 @@ object ApplicationConfiguration {
       .get.toValidatedNec
     appPortV.map {appPort =>
       HttpServerParameters(
-        host = Try(cfgApp.getOptions.getList("app").getString("host").trim).toOption.filter(_.nonEmpty).getOrElse {
-          Try(hostInfo.getIPaddress.trim).toOption.filter(_.nonEmpty).getOrElse("localhost")
-        },
+        host = Try(cfgApp.getOptions.getList("app").getString("host").trim).toOption.filter(_.nonEmpty)
+          .getOrElse(Try(hostInfo.getIPaddress.trim).toOption.filter(_.nonEmpty).getOrElse("localhost")),
         port = appPort
       )
     }
   }
 
-  def getHttpServerInfo: Option[HttpServerParameters] = httpServerInfoOpt
-
-  def setHttpServerInfo(httpServerInfo: HttpServerParameters): Unit = httpServerInfoOpt = Option(httpServerInfo)
-
+  /** Retrieve Database information from application.conf configuration file */
   def parseDatabaseParameters(implicit config: Config): ValidationResult[DatabaseParameters] = {
     Try(config.getConfig("db"))
       .map(Right(_))
@@ -213,26 +191,25 @@ object ApplicationConfiguration {
           .recover(_ => Left(DbPropertiesConfigIsNotDefined))
           .get.toValidatedNec
           .andThen { dbPropConfig =>
-            (
-              Try(dbPropConfig.getString("databaseName").trim).map(Right(_))
+            val databaseNameV = Try(dbPropConfig.getString("databaseName").trim).map(Right(_))
                 .map {
                   case Right("") => Left(DatabaseNameIsNotSpecified)
                   case Right(value) => Right(value)
                 }
-                .recover(_ => Left(DatabaseNameIsNotSpecified)).get.toValidatedNec,
-              Try(dbPropConfig.getString("user").trim).map(Right(_))
+                .recover(_ => Left(DatabaseNameIsNotSpecified)).get.toValidatedNec
+            val userV = Try(dbPropConfig.getString("user").trim).map(Right(_))
                 .map {
                   case Right("") => Left(UserIsNotSpecified)
                   case Right(value) => Right(value)
                 }
-                .recover(_ => Left(UserIsNotSpecified)).get.toValidatedNec,
-              Try(dbPropConfig.getString("password").trim).map(Right(_))
+                .recover(_ => Left(UserIsNotSpecified)).get.toValidatedNec
+            val passwordV = Try(dbPropConfig.getString("password").trim).map(Right(_))
                 .map {
                   case Right("") => Left(PasswordIsNotSpecified)
                   case Right(value) => Right(value)
                 }
                 .recover(_ => Left(PasswordIsNotSpecified)).get.toValidatedNec
-            ).mapN { (databaseName, user, password) =>
+            (databaseNameV, userV, passwordV).mapN { (databaseName, user, password) =>
               DatabaseParameters(
                 connectionPool = Try(dbConfig.getString("connectionPool").trim).getOrElse("HikariCP"),
                 dataSourceClass = Try(dbConfig.getString("dataSourceClass").trim).getOrElse("com.microsoft.sqlserver.jdbc.SQLServerDataSource"),
@@ -250,7 +227,7 @@ object ApplicationConfiguration {
       }
   }
 
-  // Read Http server information from configuration database
+  /** Read Database information from Genesys application configuration object */
   def readDatabaseParameters(cfgApp: CfgApplication): ValidationResult[DatabaseParameters] = {
     val databaseNameV = Try(cfgApp.getOptions.getList("db").getString("databaseName").trim).map(Right(_))
       .map {
@@ -288,9 +265,4 @@ object ApplicationConfiguration {
       )
     }
   }
-
-  def getDbConnectionInfo: Option[DatabaseParameters] = dbConnectionInfoOpt
-
-  def setDbConnectionInfo(dbConnInfo: DatabaseParameters): Unit = dbConnectionInfoOpt = Option(dbConnInfo)
-
 }

@@ -1,24 +1,30 @@
 package com.svsergiy.genericapp.http
 
-import akka.http.scaladsl.server.Route
-import com.svsergiy.genericapp.database.RequestProcessorInterface
-import spray.json._
-import DefaultJsonProtocol._
 import akka.Done
 import akka.event.LoggingAdapter
 import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
-import akka.http.scaladsl.model.{HttpRequest, HttpResponse, StatusCodes}
+import akka.http.scaladsl.model.{HttpResponse, StatusCodes}
 import akka.http.scaladsl.server.Directives._
-
+import akka.http.scaladsl.server.Route
+import spray.json._
+import DefaultJsonProtocol._
 import scala.concurrent.Future
 import scala.concurrent.duration.DurationInt
 import scala.util.{Failure, Success}
+import com.svsergiy.genericapp.database.RequestProcessorInterface
 
 object RouteFactory {
-  //Case classes that define contract (data exchange) between http rest requests and request processor
+  /** Case classes that define contract (data exchange) between http rest requests and request processor */
 
-  //Customer class that is used for customer creation and update all customer attributes
-  case class Customer(phoneNumber: String, firstName: String, lastName: String, balance: Double, products: String, lcaAgent: String) {
+  /** Customer class that is used for customer creation and update all customer attributes */
+  case class Customer(
+    phoneNumber: String,
+    firstName: String,
+    lastName: String,
+    balance: Double,
+    products: String,
+    lcaAgent: String,
+  ) {
     def toLog: String =
       s"""|
           |    Customer {
@@ -31,7 +37,7 @@ object RouteFactory {
           |    }""".stripMargin
   }
 
-  //CustomerPhone Class for request full customer information
+  /** CustomerPhone Class for request full customer information */
   case class CustomerPhone(phoneNumber: String) {
     def toLog: String =
       s"""|
@@ -40,7 +46,7 @@ object RouteFactory {
           |  }""".stripMargin
   }
 
-  //Customer attributes classes:
+  /** Customer attributes classes */
   val CustomerAttrNames: List[String] = List("phoneNumber", "firstName", "lastName", "balance", "products", "lcaAgent")
 
   sealed trait CustomerAttr {
@@ -55,7 +61,7 @@ object RouteFactory {
           |      }""".stripMargin
   }
 
-  //List of the Customer Attributes to update:
+  /** List of the Customer Attributes to update */
   case class CustomerAttributes(phoneNumber: String, customerAttributes: List[CustomerAttr]) {
     def toLog: String =
       s"""|
@@ -65,7 +71,7 @@ object RouteFactory {
           |  }""".stripMargin
   }
 
-  //List of the implicits for marshalling/unmarshalling requests bodies in JSON format:
+  /** List of the implicits for marshalling/unmarshalling requests bodies in JSON format */
   implicit val printer: PrettyPrinter.type = PrettyPrinter
   implicit val formatCustomer: RootJsonFormat[Customer] = jsonFormat6(Customer.apply)
   implicit val formatCustomerPhone: RootJsonFormat[CustomerPhone] = jsonFormat1(CustomerPhone.apply)
@@ -94,15 +100,30 @@ object RouteFactory {
   implicit val formatCustomerAttrs: RootJsonFormat[CustomerAttributes] = jsonFormat2(CustomerAttributes.apply)
 }
 
-class RouteFactory (requestsProcessor: RequestProcessorInterface, log: LoggingAdapter) {
-
+class RouteFactory (requestProcessor: RequestProcessorInterface, log: LoggingAdapter) {
   import com.svsergiy.genericapp.http.RouteFactory._
+
+  def getRoute: Route = {
+    log.debug("getRoute method invocation...")
+    val timeoutResponse: HttpResponse = HttpResponse(StatusCodes.EnhanceYourCalm, entity = "Good Luck!")
+    concat(
+      (pathPrefixTest("customer" / "") and pathPrefix("customer")) {
+        concat(
+          (get & path("get")) (withRequestTimeout(20.seconds, _ => timeoutResponse) (CustomerGet.customerGetRoute)),
+          (post & path("create")) (withRequestTimeout(30.seconds) (CustomerCreate.customerCreateRoute)),
+          (post & path("update")) (withRequestTimeout(30.seconds) (CustomerUpdate.customerUpdateRoute)),
+          WrongPath.innerWrongRequestName
+        )
+      },
+      WrongPath.innerWrongUrlStartRoute
+    )
+  }
 
   private object CustomerGet {
     private val innerCustomerGetRoute: Route = {
-      entity(as[CustomerPhone]) { custPhone =>
-        log.debug(s"Request: customer/get${custPhone.toLog}")
-        val maybeCustomerInfo: Future[Option[Customer]] = requestsProcessor.getCustomer(custPhone)
+      entity(as[CustomerPhone]) { customerPhone =>
+        log.debug(s"Request: customer/get${customerPhone.toLog}")
+        val maybeCustomerInfo: Future[Option[Customer]] = requestProcessor.getCustomer(customerPhone)
         onComplete(maybeCustomerInfo) {
           case Success(Some(customerInfo)) =>
             log.debug(s"Response: customer/get${customerInfo.toLog}")
@@ -123,7 +144,7 @@ class RouteFactory (requestsProcessor: RequestProcessorInterface, log: LoggingAd
 
     val customerGetRoute: Route = {
       log.debug("Customer get request...")
-      if (requestsProcessor.isNotAvailable) {
+      if (requestProcessor.isNotAvailable) {
         log.error("Request Processor unavailable")
         complete(StatusCodes.ServiceUnavailable, "Requests Processor is not available")
       } else {
@@ -137,7 +158,7 @@ class RouteFactory (requestsProcessor: RequestProcessorInterface, log: LoggingAd
       decodeRequest (
         entity(as[Customer]) { customer =>
           log.debug(s"Request: customer/create${customer.toLog}")
-          val maybeDone: Future[Done] = requestsProcessor.createCustomer(customer)
+          val maybeDone: Future[Done] = requestProcessor.createCustomer(customer)
           onComplete(maybeDone) {
             case Success(_) =>
               log.debug(s"Response: customer/create: Done")
@@ -156,7 +177,7 @@ class RouteFactory (requestsProcessor: RequestProcessorInterface, log: LoggingAd
 
     val customerCreateRoute: Route = {
       log.debug("Customer create request...")
-      if (requestsProcessor.isNotAvailable) {
+      if (requestProcessor.isNotAvailable) {
         log.error("Request Processor unavailable")
         complete(StatusCodes.ServiceUnavailable, "Requests Processor is not available")
       } else {
@@ -167,9 +188,9 @@ class RouteFactory (requestsProcessor: RequestProcessorInterface, log: LoggingAd
 
   private object CustomerUpdate {
     private val innerCustomerUpdateRoute: Route = {
-      entity(as[CustomerAttributes]) { custAttrs =>
-        log.debug(s"Request: customer/update${custAttrs.toLog}")
-        val maybeDone: Future[Done] = requestsProcessor.updateCustomer(custAttrs)
+      entity(as[CustomerAttributes]) { customerAttrs =>
+        log.debug(s"Request: customer/update${customerAttrs.toLog}")
+        val maybeDone: Future[Done] = requestProcessor.updateCustomer(customerAttrs)
         onComplete(maybeDone) {
           case Success(_) =>
             log.debug(s"Response: customer/update: Done")
@@ -187,7 +208,7 @@ class RouteFactory (requestsProcessor: RequestProcessorInterface, log: LoggingAd
 
     val customerUpdateRoute: Route = {
       log.debug("Customer update request...")
-      if (requestsProcessor.isNotAvailable) {
+      if (requestProcessor.isNotAvailable) {
         log.error("Request Processor unavailable")
         complete(StatusCodes.ServiceUnavailable, "Requests Processor is not available")
       } else {
@@ -202,21 +223,5 @@ class RouteFactory (requestsProcessor: RequestProcessorInterface, log: LoggingAd
 
     val innerWrongRequestName: Route =
       complete(StatusCodes.BadRequest, "Request path suffix should be one of the: \"get\", \"create\", \"update\"")
-  }
-
-  def getRoute: Route = {
-    log.debug("getRoute method invocation...")
-    val timeoutResponse: HttpResponse = HttpResponse(StatusCodes.EnhanceYourCalm, entity = "Good Luck!")
-    concat(
-      (pathPrefixTest("customer" / "") and pathPrefix("customer")) {
-        concat(
-          (get & path("get")) (withRequestTimeout(20.seconds, _ => timeoutResponse) (CustomerGet.customerGetRoute)),
-          (post & path("create")) (withRequestTimeout(30.seconds) (CustomerCreate.customerCreateRoute)),
-          (post & path("update")) (withRequestTimeout(30.seconds) (CustomerUpdate.customerUpdateRoute)),
-          WrongPath.innerWrongRequestName
-        )
-      },
-      WrongPath.innerWrongUrlStartRoute
-    )
   }
 }

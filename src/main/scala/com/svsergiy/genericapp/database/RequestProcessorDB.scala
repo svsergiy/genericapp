@@ -39,6 +39,8 @@ class RequestProcessorDB extends RequestProcessorInterface {
   def initialize(): Try[Unit] = {
     if (dbParametersOpt.isDefined) {
       Try {
+        // FIXME: Implement DB pool initialization with DatabaseParameters case class. Currently only configuration
+        //  from application.conf file is used
         Database.forConfig("db")
       }.map {db =>
         dbOpt = Some(db)
@@ -49,10 +51,10 @@ class RequestProcessorDB extends RequestProcessorInterface {
     }
   }
 
-  //OptionT can be used
+  // TODO: Check if OptionT type class can be used for getCustomer method
   def getCustomer(customerPhone: CustomerPhone): Future[Option[Customer]] = {
     if (dbOpt.isDefined) {
-      val queryCustomer = customers.filter(_.phoneNumber === customerPhone.phoneNumber)//.take(1)
+      val queryCustomer = customers.filter(_.phoneNumber === customerPhone.phoneNumber)
       dbOpt.get.run(queryCustomer.result).map(_.headOption)
     } else {
       Future.failed(new Exception("DB is not defined"))
@@ -70,12 +72,7 @@ class RequestProcessorDB extends RequestProcessorInterface {
 
   def updateCustomer(custAttrs: CustomerAttributes): Future[Done] = {
     if (dbOpt.isDefined) {
-/*      val (phoneNum, attrs) = (custAttrs.phoneNumber, custAttrs.customerAttributes)
-      val mappedAttrs = attrs.map {
-        case attr: CustomerAttribute[String] => (attr.name, attr.value)
-        case attr: CustomerAttribute[Double] => (attr.name, attr.value.toString)
-      }.toMap.withDefaultValue("")
-    val updateCustomer = customers.filter(_.phoneNumber.toString() == custAttrs.phoneNumber).take(1) */
+      // TODO: Implement updateCustomer logic to update customer field/fields in Database...
       Future.successful(Done)
     } else {
       Future.failed(new Exception("DB is not defined"))

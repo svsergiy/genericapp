@@ -13,6 +13,5 @@ object Main {
     log.info("Starting Genesys Generic App...")
     system.actorOf(ManagementService.props(), name = "ManagementService")
     Await.ready(system.whenTerminated, Duration.Inf)
-    log.info("Genesys Generic App has been stopped")
   }
 }

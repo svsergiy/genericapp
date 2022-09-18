@@ -1,75 +1,40 @@
 package com.svsergiy.genericapp.genesys
 
-//Akka imports:
 import akka.actor.{Actor, ActorRef, Props, Timers}
 import akka.event.LoggingReceive
-
-//Other imports:
 import scala.concurrent.duration.DurationInt
-
-//Genesys imports:
 import com.genesyslab.platform.commons.protocol.{ChannelClosedEvent, ChannelErrorEvent}
 import com.genesyslab.platform.management.protocol.{ApplicationExecutionMode, ApplicationStatus}
-
-//Application imports:
 import com.svsergiy.genericapp.configuration.LcaConnectionParameters
 
 object LocalControlAgentActor {
-  private case object LcaReconnectTimerKey    //Timer key for reconnection to LCA in case of lost connection
+  /** Timer key for reconnection to LCA in case of lost connection */
+  private case object LcaReconnectTimerKey
 
-  sealed trait LcaMessage
-  case object ReconnectToLca extends LcaMessage                                       //Internal message to reconnect to LCA
-  case object ConnectedToLca extends LcaMessage                                       //from Lca Actor to Management Actor
-  case class StopApplication(gracefully: Boolean) extends LcaMessage                  //from Lca Actor to Management Actor
-  case class SetApplicationStatus(appStatus: ApplicationStatus) extends LcaMessage    //from Management Actor to Lca Actor
+  /** Messages between ManagementService Actor and Lca Actor */
+  sealed trait LcaActorMessage
+  case object ReconnectToLca extends LcaActorMessage                                       /** Internal message to reconnect to LCA */
+  case object ConnectedToLca extends LcaActorMessage                                       /** from Lca Actor to ManagementService Actor */
+  case class StopApplication(gracefully: Boolean) extends LcaActorMessage                  /** from Lca Actor to ManagementService Actor */
+  case class SetApplicationStatus(appStatus: ApplicationStatus) extends LcaActorMessage    /** from ManagementService Actor to Lca Actor */
 
   def props(appStartInfo: LcaConnectionParameters, managementActorRef: ActorRef): Props =
     Props(new LocalControlAgentActor(appStartInfo, managementActorRef))
 }
 
-class LocalControlAgentActor(appStartInfo: LcaConnectionParameters, managementActorRef: ActorRef)
+/** Akka Classic Actor Class is used for managing connection to Genesys LCA component. In case of failed connection or
+ *  disconnection reconnection is initiated by the Actor.
+ *  @param lcaConnectionInfo - configuration information to connect to Genesys LCA component
+ */
+class LocalControlAgentActor(lcaConnectionInfo: LcaConnectionParameters, managementActorRef: ActorRef)
   extends Actor with Timers with akka.actor.ActorLogging with LocalControlAgentDriver {
 
   import com.svsergiy.genericapp.genesys.LocalControlAgentActor._
 
-  protected def onLcaConnectionOpened(): Unit = {
-    log.info("Connected to LCA")
-    if (!getExecutionMode.contains(ApplicationExecutionMode.Exiting)
-        && !getControlStatus.contains(ApplicationStatus.Suspending.ordinal))
-      managementActorRef ! ConnectedToLca
-  }
-
-  protected def onLcaConnectionLost(event: ChannelClosedEvent): Unit = {
-    log.error("Lost connection to LCA...")
-    if ((event != null) && (event.getCause != null)
-                        && !getExecutionMode.contains(ApplicationExecutionMode.Exiting)) {
-      log.info(s"Retry in ${appStartInfo.reconnectTimeout} seconds")
-      timers.startSingleTimer(LcaReconnectTimerKey, ReconnectToLca, appStartInfo.reconnectTimeout.seconds)
-    }
-  }
-
-  protected def onLcaConnectionError(event: ChannelErrorEvent): Unit = {
-    log.error(s"LCA connection error... Retry in ${appStartInfo.reconnectTimeout} seconds")
-    timers.startSingleTimer(LcaReconnectTimerKey, ReconnectToLca, appStartInfo.reconnectTimeout.seconds)
-  }
-
-  protected def onSuspendApplication(): Unit = {
-    log.info("Get request from SCS to stop application gracefully")
-    managementActorRef ! StopApplication(gracefully = true)
-  }
-
-  protected def onChangeExecutionMode(execMode: ApplicationExecutionMode): Boolean = {
-    if (execMode == ApplicationExecutionMode.Exiting) {
-      log.info("Get request from SCS to stop application")
-      managementActorRef ! StopApplication(gracefully = false)
-    }
-    true
-  }
-
   override def preStart(): Unit = {
     super.preStart()
     log.info("Try to connect to LCA...")
-    initializeLcaDriver(appStartInfo, log).flatMap(_ => openLca())
+    initializeLcaDriver(lcaConnectionInfo, log).flatMap(_ => openLca())
       .recover(ex => log.error(s"Exception when trying to connect to LCA: $ex"))
   }
 
@@ -88,8 +53,8 @@ class LocalControlAgentActor(appStartInfo: LcaConnectionParameters, managementAc
   }
 
   val receive: Receive = LoggingReceive {
-    case msg @ SetApplicationStatus(appStatus: ApplicationStatus) =>
-      log.debug(s"Request to change application status to: $msg")
+    case SetApplicationStatus(appStatus: ApplicationStatus) =>
+      log.debug(s"Request to change application status to: $appStatus")
       doUpdateStatus(getExecutionMode, appStatus)
     case ReconnectToLca =>
       if (!isLcaConnected) {
@@ -97,5 +62,40 @@ class LocalControlAgentActor(appStartInfo: LcaConnectionParameters, managementAc
         openLca()
       }
     case msg => log.error(s"Unsupported Lca Actor message: $msg")
+  }
+
+
+  protected def onLcaConnectionOpened(): Unit = {
+    log.info("Connected to LCA")
+    if (!getExecutionMode.contains(ApplicationExecutionMode.Exiting)
+      && !getControlStatus.contains(ApplicationStatus.Suspending.ordinal))
+      managementActorRef ! ConnectedToLca
+  }
+
+  protected def onLcaConnectionLost(event: ChannelClosedEvent): Unit = {
+    log.error("Lost connection to LCA...")
+    if ((event != null) && (event.getCause != null)
+      && !getExecutionMode.contains(ApplicationExecutionMode.Exiting)) {
+      log.info(s"Retry in ${lcaConnectionInfo.reconnectTimeout} seconds")
+      timers.startSingleTimer(LcaReconnectTimerKey, ReconnectToLca, lcaConnectionInfo.reconnectTimeout.seconds)
+    }
+  }
+
+  protected def onLcaConnectionError(event: ChannelErrorEvent): Unit = {
+    log.error(s"LCA connection error... Retry in ${lcaConnectionInfo.reconnectTimeout} seconds")
+    timers.startSingleTimer(LcaReconnectTimerKey, ReconnectToLca, lcaConnectionInfo.reconnectTimeout.seconds)
+  }
+
+  protected def onSuspendApplication(): Unit = {
+    log.info("Get request from SCS to stop application gracefully")
+    managementActorRef ! StopApplication(gracefully = true)
+  }
+
+  protected def onChangeExecutionMode(execMode: ApplicationExecutionMode): Boolean = {
+    if (execMode == ApplicationExecutionMode.Exiting) {
+      log.info("Get request from SCS to stop application")
+      managementActorRef ! StopApplication(gracefully = false)
+    }
+    true
   }
 }
