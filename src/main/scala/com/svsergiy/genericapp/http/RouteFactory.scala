@@ -100,11 +100,11 @@ object RouteFactory {
   implicit val formatCustomerAttrs: RootJsonFormat[CustomerAttributes] = jsonFormat2(CustomerAttributes.apply)
 }
 
-class RouteFactory (requestProcessor: RequestProcessorInterface, log: LoggingAdapter) {
+class RouteFactory (requestProcessor: RequestProcessorInterface, logOpt: Option[LoggingAdapter]) {
   import com.svsergiy.genericapp.http.RouteFactory._
 
   def getRoute: Route = {
-    log.debug("getRoute method invocation...")
+    logOpt.foreach(_.debug("getRoute method invocation..."))
     val timeoutResponse: HttpResponse = HttpResponse(StatusCodes.EnhanceYourCalm, entity = "Good Luck!")
     concat(
       (pathPrefixTest("customer" / "") and pathPrefix("customer")) {
@@ -122,17 +122,17 @@ class RouteFactory (requestProcessor: RequestProcessorInterface, log: LoggingAda
   private object CustomerGet {
     private val innerCustomerGetRoute: Route = {
       entity(as[CustomerPhone]) { customerPhone =>
-        log.debug(s"Request: customer/get${customerPhone.toLog}")
+        logOpt.foreach(_.debug(s"Request: customer/get${customerPhone.toLog}"))
         val maybeCustomerInfo: Future[Option[Customer]] = requestProcessor.getCustomer(customerPhone)
         onComplete(maybeCustomerInfo) {
           case Success(Some(customerInfo)) =>
-            log.debug(s"Response: customer/get${customerInfo.toLog}")
+            logOpt.foreach(_.debug(s"Response: customer/get${customerInfo.toLog}"))
             complete(customerInfo)
           case Success(None) =>
-            log.debug("Response: customer/get: customer not found")
+            logOpt.foreach(_.debug("Response: customer/get: customer not found"))
             complete(StatusCodes.NotFound)
           case Failure(ex) =>
-            log.error(s"Failed customer/get request due to $ex exception")
+            logOpt.foreach(_.error(s"Failed customer/get request due to $ex exception"))
             complete(StatusCodes.InternalServerError)
         }
       }
@@ -143,9 +143,9 @@ class RouteFactory (requestProcessor: RequestProcessorInterface, log: LoggingAda
     }
 
     val customerGetRoute: Route = {
-      log.debug("Customer get request...")
+      logOpt.foreach(_.debug("Customer get request..."))
       if (requestProcessor.isNotAvailable) {
-        log.error("Request Processor unavailable")
+        logOpt.foreach(_.error("Request Processor unavailable"))
         complete(StatusCodes.ServiceUnavailable, "Requests Processor is not available")
       } else {
         concat(innerCustomerGetRoute, innerWrongCustomerGetRequestRoute)
@@ -157,14 +157,14 @@ class RouteFactory (requestProcessor: RequestProcessorInterface, log: LoggingAda
     private val innerCustomerCreateRoute: Route = {
       decodeRequest (
         entity(as[Customer]) { customer =>
-          log.debug(s"Request: customer/create${customer.toLog}")
+          logOpt.foreach(_.debug(s"Request: customer/create${customer.toLog}"))
           val maybeDone: Future[Done] = requestProcessor.createCustomer(customer)
           onComplete(maybeDone) {
             case Success(_) =>
-              log.debug(s"Response: customer/create: Done")
+              logOpt.foreach(_.debug(s"Response: customer/create: Done"))
               complete("Customer created")
             case Failure(ex) =>
-              log.error(s"Failed customer/create request due to $ex exception")
+              logOpt.foreach(_.error(s"Failed customer/create request due to $ex exception"))
               complete(StatusCodes.InternalServerError)
           }
         }
@@ -176,9 +176,9 @@ class RouteFactory (requestProcessor: RequestProcessorInterface, log: LoggingAda
     }
 
     val customerCreateRoute: Route = {
-      log.debug("Customer create request...")
+      logOpt.foreach(_.debug("Customer create request..."))
       if (requestProcessor.isNotAvailable) {
-        log.error("Request Processor unavailable")
+        logOpt.foreach(_.error("Request Processor unavailable"))
         complete(StatusCodes.ServiceUnavailable, "Requests Processor is not available")
       } else {
         concat(innerCustomerCreateRoute, innerWrongCustomerCreateRequestRoute)
@@ -189,14 +189,14 @@ class RouteFactory (requestProcessor: RequestProcessorInterface, log: LoggingAda
   private object CustomerUpdate {
     private val innerCustomerUpdateRoute: Route = {
       entity(as[CustomerAttributes]) { customerAttrs =>
-        log.debug(s"Request: customer/update${customerAttrs.toLog}")
+        logOpt.foreach(_.debug(s"Request: customer/update${customerAttrs.toLog}"))
         val maybeDone: Future[Done] = requestProcessor.updateCustomer(customerAttrs)
         onComplete(maybeDone) {
           case Success(_) =>
-            log.debug(s"Response: customer/update: Done")
+            logOpt.foreach(_.debug(s"Response: customer/update: Done"))
             complete("Customer updated")
           case Failure(ex) =>
-            log.error(s"Failed customer/update request due to $ex exception")
+            logOpt.foreach(_.error(s"Failed customer/update request due to $ex exception"))
             complete(StatusCodes.InternalServerError)
         }
       }
@@ -207,9 +207,9 @@ class RouteFactory (requestProcessor: RequestProcessorInterface, log: LoggingAda
     }
 
     val customerUpdateRoute: Route = {
-      log.debug("Customer update request...")
+      logOpt.foreach(_.debug("Customer update request..."))
       if (requestProcessor.isNotAvailable) {
-        log.error("Request Processor unavailable")
+        logOpt.foreach(_.error("Request Processor unavailable"))
         complete(StatusCodes.ServiceUnavailable, "Requests Processor is not available")
       } else {
         concat(innerCustomerUpdateRoute, innerWrongCustomerUpdateRequestRoute)

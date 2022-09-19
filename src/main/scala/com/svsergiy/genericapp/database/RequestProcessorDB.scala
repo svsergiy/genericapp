@@ -1,14 +1,13 @@
 package com.svsergiy.genericapp.database
 
 import akka.Done
-import com.svsergiy.genericapp.configuration.DatabaseParameters
-import com.svsergiy.genericapp.http.RouteFactory.{Customer, CustomerAttributes, CustomerPhone}
 import slick.jdbc.JdbcBackend.Database
 import slick.jdbc.H2Profile.api._
-
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.Future
 import scala.util.{Failure, Try}
+import com.svsergiy.genericapp.configuration.DatabaseParameters
+import com.svsergiy.genericapp.http.RouteFactory.{Customer, CustomerAttributes, CustomerPhone}
 
 object RequestProcessorDB {
   class Customers(tag: Tag) extends Table[Customer](tag, "CUSTOMERS") {
@@ -37,7 +36,7 @@ class RequestProcessorDB extends RequestProcessorInterface {
     dbParametersOpt = Some(dbParams)
 
   def initialize(): Try[Unit] = {
-    if (dbParametersOpt.isDefined) {
+    if (dbParametersOpt.isDefined)
       Try {
         // FIXME: Implement DB pool initialization with DatabaseParameters case class. Currently only configuration
         //  from application.conf file is used
@@ -46,9 +45,8 @@ class RequestProcessorDB extends RequestProcessorInterface {
         dbOpt = Some(db)
         serviceUnavailable = false
       }
-    } else {
+    else
       Failure(new Exception("Configuration is not defined"))
-    }
   }
 
   // TODO: Check if OptionT type class can be used for getCustomer method
@@ -56,27 +54,24 @@ class RequestProcessorDB extends RequestProcessorInterface {
     if (dbOpt.isDefined) {
       val queryCustomer = customers.filter(_.phoneNumber === customerPhone.phoneNumber)
       dbOpt.get.run(queryCustomer.result).map(_.headOption)
-    } else {
+    } else
       Future.failed(new Exception("DB is not defined"))
-    }
   }
 
   def createCustomer(customer: Customer): Future[Done] = {
     if (dbOpt.isDefined) {
       val insertCustomer = DBIO.seq(customers += customer)
       dbOpt.get.run(insertCustomer).map(_ => Done)
-    } else {
+    } else
       Future.failed(new Exception("DB is not defined"))
-    }
   }
 
-  def updateCustomer(custAttrs: CustomerAttributes): Future[Done] = {
-    if (dbOpt.isDefined) {
+  def updateCustomer(customerAttrs: CustomerAttributes): Future[Done] = {
+    if (dbOpt.isDefined)
       // TODO: Implement updateCustomer logic to update customer field/fields in Database...
       Future.successful(Done)
-    } else {
+    else
       Future.failed(new Exception("DB is not defined"))
-    }
   }
 
   def release(): Unit = {

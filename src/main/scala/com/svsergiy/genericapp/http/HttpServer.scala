@@ -15,7 +15,7 @@ class HttpServer(context: ActorContext, val httpServerInfo: HttpServerParameters
   private implicit val executionContext: ExecutionContextExecutor = system.getDispatcher
 
   private val log: LoggingAdapter = Logging(system, this.getClass.getName)
-  private val route: Route = new RouteFactory(requestProcessor, log).getRoute
+  private val route: Route = new RouteFactory(requestProcessor, Some(log)).getRoute
   private val serverBuilder: ServerBuilder = Http().newServerAt(httpServerInfo.host, httpServerInfo.port)
   private var bindingFutureOpt: Option[Future[Http.ServerBinding]] = None
 

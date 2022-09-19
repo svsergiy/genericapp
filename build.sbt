@@ -1,4 +1,4 @@
-ThisBuild / version := "0.1.1"
+ThisBuild / version := "0.2.0"
 ThisBuild / scalaVersion := "2.13.8"
 ThisBuild / organization := "com.svsergiy"
 
@@ -35,8 +35,8 @@ lazy val root = (project in file("."))
     assemblyPackageDependency / assembleArtifact := false
   )
 
-val akkaVersion = "2.6.19"
-val akkaHttpVersion = "10.2.9"
+val akkaVersion = "2.6.20"
+val akkaHttpVersion = "10.2.10"
 
 libraryDependencies ++= Seq(
   "org.typelevel" %% "cats-core" % "2.8.0",
@@ -51,5 +51,7 @@ libraryDependencies ++= Seq(
   "com.typesafe.slick" %% "slick" % "3.3.3",
   "com.typesafe.slick" %% "slick-hikaricp" % "3.3.3",
   "com.microsoft.sqlserver" % "mssql-jdbc" % "7.2.2.jre8",
-  "org.scalameta" %% "munit" % "0.7.29" % Test
+  "org.scalatest" %% "scalatest" % "3.2.13" % "test",
+  "com.typesafe.akka" %% "akka-http-testkit" % akkaHttpVersion % "test",
+//  "org.scalameta" %% "munit" % "0.7.29" % Test,
 )
