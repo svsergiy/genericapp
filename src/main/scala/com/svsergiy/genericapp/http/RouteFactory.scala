@@ -8,6 +8,8 @@ import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.server.Route
 import spray.json._
 import DefaultJsonProtocol._
+import cats.Show
+import cats.syntax.show._
 import scala.concurrent.Future
 import scala.concurrent.duration.DurationInt
 import scala.util.{Failure, Success}
@@ -24,25 +26,27 @@ object RouteFactory {
     balance: Double,
     products: String,
     lcaAgent: String,
-  ) {
-    def toLog: String =
+  )
+  object Customer {
+    implicit val customerShow: Show[Customer] = customer =>
       s"""|
           |    Customer {
-          |        PhoneNumber: $phoneNumber
-          |        FirstName: $firstName
-          |        LastName: $lastName
-          |        Balance: ${balance.toString}
-          |        Product: $products
-          |        LastCalledAgent: $lcaAgent
+          |        PhoneNumber: ${customer.phoneNumber.show}
+          |        FirstName: ${customer.firstName.show}
+          |        LastName: ${customer.lastName.show}
+          |        Balance: ${customer.balance.show}
+          |        Product: ${customer.products.show}
+          |        LastCalledAgent: ${customer.lcaAgent.show}
           |    }""".stripMargin
   }
 
   /** CustomerPhone Class for request full customer information */
-  case class CustomerPhone(phoneNumber: String) {
-    def toLog: String =
+  case class CustomerPhone(phoneNumber: String)
+  object CustomerPhone {
+    implicit val showCustomerPhone: Show[CustomerPhone] = customerPhone =>
       s"""|
           |  CustomerPhone {
-          |    PhoneNumber: $phoneNumber
+          |    PhoneNumber: ${customerPhone.phoneNumber.show}
           |  }""".stripMargin
   }
 
@@ -122,11 +126,11 @@ class RouteFactory (requestProcessor: RequestProcessorInterface, logOpt: Option[
   private object CustomerGet {
     private val innerCustomerGetRoute: Route = {
       entity(as[CustomerPhone]) { customerPhone =>
-        logOpt.foreach(_.debug(s"Request: customer/get${customerPhone.toLog}"))
+        logOpt.foreach(_.debug(s"Request: customer/get${customerPhone.show}"))
         val maybeCustomerInfo: Future[Option[Customer]] = requestProcessor.getCustomer(customerPhone)
         onComplete(maybeCustomerInfo) {
           case Success(Some(customerInfo)) =>
-            logOpt.foreach(_.debug(s"Response: customer/get${customerInfo.toLog}"))
+            logOpt.foreach(_.debug(s"Response: customer/get${customerInfo.show}"))
             complete(customerInfo)
           case Success(None) =>
             logOpt.foreach(_.debug("Response: customer/get: customer not found"))
@@ -157,7 +161,7 @@ class RouteFactory (requestProcessor: RequestProcessorInterface, logOpt: Option[
     private val innerCustomerCreateRoute: Route = {
       decodeRequest (
         entity(as[Customer]) { customer =>
-          logOpt.foreach(_.debug(s"Request: customer/create${customer.toLog}"))
+          logOpt.foreach(_.debug(s"Request: customer/create${customer.show}"))
           val maybeDone: Future[Done] = requestProcessor.createCustomer(customer)
           onComplete(maybeDone) {
             case Success(_) =>

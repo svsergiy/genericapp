@@ -1,6 +1,6 @@
 package com.svsergiy.genericapp
 
-import akka.actor.{ActorSystem, Props}
+import akka.actor.ActorSystem
 import akka.event.Logging
 import scala.concurrent.Await
 import scala.concurrent.duration.Duration
